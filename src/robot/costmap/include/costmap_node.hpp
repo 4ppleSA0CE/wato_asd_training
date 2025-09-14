@@ -19,20 +19,8 @@ class CostmapNode : public rclcpp::Node {
   private:
     robot::CostmapCore costmap_;
     // Place these constructs here
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr string_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_pub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_sub_;
-    rclcpp::TimerBase::SharedPtr timer_;
-    
-    // Costmap parameters
-    int width_;
-    int height_;
-    double resolution_;
-    double origin_x_;
-    double origin_y_;
-    int default_value_;
-    std::string frame_id_;
-    int max_cost_;
 };
  
 #endif 

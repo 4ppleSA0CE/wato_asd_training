@@ -5,50 +5,68 @@
 #include "costmap_node.hpp"
  
 CostmapNode::CostmapNode() : Node("costmap"), costmap_(robot::CostmapCore(this->get_logger())) {
-  // Initialize the constructs and their parameters
-  string_pub_ = this->create_publisher<std_msgs::msg::String>("/test_topic", 10);
-  timer_ = this->create_wall_timer(std::chrono::milliseconds(500), std::bind(&CostmapNode::publishMessage, this));
-  this->declare_parameter("width", 100);
-  this->declare_parameter("height", 100);
-  this->declare_parameter("resolution", 0.1);
-  this->declare_parameter("origin_x", -5.0);
-  this->declare_parameter("origin_y", -5.0);
-  this->declare_parameter("default_value", 0);
-  this->declare_parameter("frame_id", "map");
-  this->declare_parameter("max_cost", 100);
-
-  width_ = this->get_parameter("width").as_int();
-  height_ = this->get_parameter("height").as_int();
-  resolution_ = this->get_parameter("resolution").as_double();
-  origin_x_ = this->get_parameter("origin_x").as_double();
-  origin_y_ = this->get_parameter("origin_y").as_double();
-  default_value_ = this->get_parameter("default_value").as_int();
-  frame_id_ = this->get_parameter("frame_id").as_string();
-  max_cost_ = this->get_parameter("max_cost").as_int();
-
-  costmap_.initialize(width_, height_, resolution_, origin_x_, origin_y_, default_value_, frame_id_, max_cost_);
-
+  costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("costmap", 10);
   laser_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>("/lidar", 10, std::bind(&CostmapNode::laserScanCallback, this, std::placeholders::_1));
-
-  costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/costmap", 10);
-
-  RCLCPP_INFO(this->get_logger(), "Costmap initialized");
 }
- 
+
 void CostmapNode::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-  costmap_.update_costmap(msg);
-  auto costmap = costmap_.get_costmap();
-  costmap_pub_->publish(costmap);
-  RCLCPP_INFO(this->get_logger(), "LaserScan received");
+  static constexpr int width = 100;
+  static constexpr int height = 100;
+  static constexpr double resolution = 0.1;
+  static constexpr int default_value = 0;
+  static constexpr int max_cost = 100;
+  static constexpr double inflation_radius = 0.5;
+
+  std::vector<int8_t> costmap(width * height, default_value);
+
+  for (size_t i = 0; i < msg->ranges.size(); i++) {
+    double range = msg->ranges[i];
+    double angle = msg->angle_min + i * msg->angle_increment;
+
+    //check if the point is in the range of the laser scan
+    if (range < msg->range_min || range > msg->range_max || std::isnan(range)) {
+      continue;
+    }
+      
+    double x = range * cos(angle);
+    double y = range * sin(angle);
+    int x_grid = x / resolution+width/2;
+    int y_grid = y / resolution+height/2;
+
+    //check if the point is in the costmap
+    if (x_grid < 0 || x_grid >= width || y_grid < 0 || y_grid >= height) {
+      continue;
+    }
+
+    costmap[y_grid * width + x_grid] = max_cost;
+
+    //inflate the obstacle
+    int inflation = (int)(range / resolution);
+    for (int i = -inflation; i < inflation; i++) {
+      for (int j = -inflation; j < inflation; j++) {
+        int x_grid_inflation = x_grid + i;
+        int y_grid_inflation = y_grid + j;
+        if (x_grid_inflation < 0 || x_grid_inflation >= width || y_grid_inflation < 0 || y_grid_inflation >= height) {
+          continue;
+        }
+        double dis = std::sqrt(i*i + j*j)*resolution;
+        int index = y_grid_inflation * width + x_grid_inflation;
+        costmap[index] = std::max(costmap[index], static_cast<int8_t>(100-(int)(dis/inflation_radius*100)));
+      }
+    }
+  }
+  
+  // Create and publish the occupancy grid message
+  nav_msgs::msg::OccupancyGrid costmap_msg;
+  costmap_msg.header.frame_id = "robot/chassis";  // Set the frame_id for proper visualization
+  costmap_msg.info.resolution = resolution;
+  costmap_msg.info.width = width;
+  costmap_msg.info.height = height;
+  costmap_msg.data = costmap;
+  
+  costmap_pub_->publish(costmap_msg);
 }
-// Define the timer to publish a message every 500ms
-void CostmapNode::publishMessage() {
-  auto message = std_msgs::msg::String();
-  message.data = "Hello, ROS 2!";
-  RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", message.data.c_str());
-  string_pub_->publish(message);
-}
- 
+  
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
