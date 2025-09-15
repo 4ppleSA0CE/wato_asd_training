@@ -5,7 +5,7 @@ MapMemoryNode::MapMemoryNode() : Node("map_memory"), map_memory_(robot::MapMemor
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom/filtered", 10, std::bind(&MapMemoryNode::odomCallback, this, std::placeholders::_1));
   map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/map", 10);
   timer_ = this->create_wall_timer(std::chrono::seconds(1), std::bind(&MapMemoryNode::timerCallback, this));
-  map_ = std::vector<int8_t>(200 * 200, -1);
+  map_ = std::vector<int8_t>(300 * 300, -1);
 }
 
 void MapMemoryNode::costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
@@ -34,8 +34,8 @@ void MapMemoryNode::updateMap() {
   if (!update_ || map_msg_.data.empty()) {
     return;
   }
-  static constexpr int width = 200;
-  static constexpr int height = 200;
+  static constexpr int width = 300;
+  static constexpr int height = 300;
   static constexpr double resolution = 0.1;
   double yaw = std::atan2(2.0 * (heading_.w * heading_.z + heading_.x * heading_.y), 1.0 - 2.0 * (heading_.y * heading_.y + heading_.z * heading_.z));
   for (auto y = 0; y < static_cast<int>(map_msg_.info.height); y++) {
