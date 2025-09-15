@@ -51,13 +51,15 @@ void CostmapNode::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr
         }
         double dis = std::sqrt(i*i + j*j)*resolution;
         int index = y_grid_inflation * width + x_grid_inflation;
-        costmap[index] = std::max(costmap[index], static_cast<int8_t>(100-(int)(dis/inflation_radius*100)));
+        costmap[index]  = std::max(costmap[index], static_cast<int8_t>(std::max(0,100-(int)(dis/inflation_radius*100))));
       }
     }
   }
   
   // Create and publish the occupancy grid message
   nav_msgs::msg::OccupancyGrid costmap_msg;
+  costmap_msg.header.stamp = msg->header.stamp;
+  costmap_msg.header.frame_id = msg->header.frame_id;
   costmap_msg.info.resolution = resolution;
   costmap_msg.info.width = width;
   costmap_msg.info.height = height;

@@ -30,7 +30,6 @@ target_include_directories(map_memory_lib
 ament_target_dependencies(map_memory_lib 
   rclcpp
   nav_msgs
-  geometry_msgs
 )
 
 # Create ROS2 node executable from source files

@@ -21,6 +21,6 @@ class CostmapNode : public rclcpp::Node {
     // Place these constructs here
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_pub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_sub_;
-};
+}; 
  
 #endif 
