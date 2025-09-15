@@ -10,8 +10,8 @@ CostmapNode::CostmapNode() : Node("costmap"), costmap_(robot::CostmapCore(this->
 }
 
 void CostmapNode::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-  static constexpr int width = 100;
-  static constexpr int height = 100;
+  static constexpr int width = 300;
+  static constexpr int height = 300;
   static constexpr double resolution = 0.1;
   static constexpr int default_value = 0;
   static constexpr int max_cost = 100;
@@ -64,6 +64,8 @@ void CostmapNode::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr
   costmap_msg.info.width = width;
   costmap_msg.info.height = height;
   costmap_msg.data = costmap;
+  costmap_msg.info.origin.position.x = -15;
+  costmap_msg.info.origin.position.y = -15;
   
   costmap_pub_->publish(costmap_msg);
 }
