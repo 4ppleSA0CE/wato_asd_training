@@ -5,10 +5,9 @@
 
 #include "planner_core.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "nav_msgs/msg/path.hpp"
-#include "geometry_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include <queue>
 #include <unordered_map>
@@ -69,15 +68,16 @@ enum class PlannerState {
 class PlannerNode : public rclcpp::Node {
   public:
     PlannerNode();
-    void odomCallback(const geometry_msgs::msg::Odometry::SharedPtr msg);
+    void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-    void goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    void goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg);
+    void goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
     void timerCallback();
 
   private:
     robot::PlannerCore planner_;
     
-    rclcpp::Subscription<geometry_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr goal_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -89,12 +89,16 @@ class PlannerNode : public rclcpp::Node {
 
     PlannerState plan_flag_;
     bool goal_flag_ = false;
+    int obstacle_threshold_ = 80;
+    double check_bound_ratio = 1.0;
+    static constexpr int THRESHOLD_INCREMENT = 10;
 
     void createPath();
     CellIndex getCellIndex(const geometry_msgs::msg::Pose& pose);
     geometry_msgs::msg::Pose getPose(const CellIndex& index);
     double heuristic(const CellIndex& goal, const CellIndex& current);
     bool checkValid(const CellIndex& index);
+    bool goalReached();
 
 };
 

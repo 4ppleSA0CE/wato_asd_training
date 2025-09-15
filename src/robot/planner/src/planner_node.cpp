@@ -1,26 +1,38 @@
 #include "planner_node.hpp"
 #include <vector>
 #include <algorithm>
+#include <sstream>
+#include <iomanip>
 
 PlannerNode::PlannerNode() : Node("planner"), planner_(robot::PlannerCore(this->get_logger())) {
-  odom_sub_ = this->create_subscription<geometry_msgs::msg::Odometry>("/odom/filtered", 10, std::bind(&PlannerNode::odomCallback, this, std::placeholders::_1));
+  RCLCPP_INFO(this->get_logger(), "Initializing PlannerNode");
+  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom/filtered", 10, std::bind(&PlannerNode::odomCallback, this, std::placeholders::_1));
   map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/map", 10, std::bind(&PlannerNode::mapCallback, this, std::placeholders::_1));
   goal_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>("/goal_point", 10, std::bind(&PlannerNode::goalCallback, this, std::placeholders::_1));
   timer_ = this->create_wall_timer(std::chrono::milliseconds(500), std::bind(&PlannerNode::timerCallback, this));
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/path", 10);
+  RCLCPP_INFO(this->get_logger(), "PlannerNode initialized");
 }
 
-void PlannerNode::odomCallback(const geometry_msgs::msg::Odometry::SharedPtr msg) {
+void PlannerNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+  RCLCPP_DEBUG(this->get_logger(), "odomCallback");
   pose_msg_ = msg->pose.pose;
 }
 
 void PlannerNode::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+  RCLCPP_DEBUG(this->get_logger(), "mapCallback (size=%zu)", msg->data.size());
   map_msg_ = *msg;
-  if (plan_flag_ == PlannerState::waiting_for_robot_to_reach_goal && !map_msg_.data.empty()) {
+  if (map_msg_.data.empty()) {
+    RCLCPP_WARN(this->get_logger(), "Received empty map, cannot plan path!");
+    return;
+  }
+  if (plan_flag_ == PlannerState::waiting_for_robot_to_reach_goal) {
+    RCLCPP_INFO(this->get_logger(), "Map updated: triggering createPath");
     createPath();
   }
 }
 void PlannerNode::goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+  RCLCPP_INFO(this->get_logger(), "goalCallback: (%.3f, %.3f)", msg->point.x, msg->point.y);
   goal_msg_ = *msg;
   plan_flag_ = PlannerState::waiting_for_robot_to_reach_goal;
   goal_flag_ = true;
@@ -29,93 +41,31 @@ void PlannerNode::goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr
 
 void PlannerNode::timerCallback() {
   if (plan_flag_ == PlannerState::waiting_for_robot_to_reach_goal && goal_flag_) {
-    double dis = std::sqrt(std::pow(goal_msg_.pose.position.x - pose_msg_.position.x, 2) + std::pow(goal_msg_.pose.position.y - pose_msg_.position.y, 2));
-    if (dis < 0.5){
+    if (goalReached()) {
+      RCLCPP_INFO(this->get_logger(), "Goal reached!");
       plan_flag_ = PlannerState::waiting_for_goal;
-      nav_msgs::msg::Path path;
-      path_pub_->publish(path);
-    }else createPath();
-  }
-}
-
-CellIndex PlannerNode::getCellIndex(const geometry_msgs::msg::Pose& pose) {
-  int x = static_cast<int>(pose.position.x/map_msg_.info.resolution + static_cast<int>(map_msg_.info.width/2));
-  int y = static_cast<int>(pose.position.y/map_msg_.info.resolution + static_cast<int>(map_msg_.info.height/2));
-  return CellIndex(x, y);
-}
-
-geometry_msgs::msg::Pose PlannerNode::getPose(const CellIndex& index) {
-  geometry_msgs::msg::Pose pose;
-  pose.position.x = (index.x - static_cast<int>(map_msg_.info.width/2)) * map_msg_.info.resolution;
-  pose.position.y = (index.y - static_cast<int>(map_msg_.info.height/2)) * map_msg_.info.resolution;
-  pose.orientation.w = 1.0;
-  pose.orientation.z = 0.0;
-  return pose;
-}
-
-double PlannerNode::heuristic(const CellIndex& goal, const CellIndex& current) {
-  return std::sqrt(std::pow(goal.x - current.x, 2) + std::pow(goal.y - current.y, 2));
-}
-
-bool PlannerNode::checkValid(const CellIndex& index) {
-  // Bounds check for the cell itself
-  if (index.x < 0 || index.x >= static_cast<int>(map_msg_.info.width) ||
-      index.y < 0 || index.y >= static_cast<int>(map_msg_.info.height)) {
-    return false;
-  }
-
-  // Robot footprint parameters
-  const double ROBOT_LENGTH = 1.5;  // meters (behind the robot's front cell)
-  const double ROBOT_WIDTH  = 1.0;  // meters (centered on robot)
-  const double GRID_STEP    = std::max(0.1, static_cast<double>(map_msg_.info.resolution));
-  const int OBSTACLE_THRESHOLD = 50; // occupancy threshold
-
-  // Robot orientation (yaw)
-  const double yaw = std::atan2(2.0 * (pose_msg_.orientation.w * pose_msg_.orientation.z + pose_msg_.orientation.x * pose_msg_.orientation.y), 1.0 - 2.0 * (pose_msg_.orientation.y * pose_msg_.orientation.y + pose_msg_.orientation.z * pose_msg_.orientation.z));
-
-  // World coordinates of the given cell (treated as robot front)
-  geometry_msgs::msg::Pose world_pose = getPose(index);
-  const double rx = world_pose.position.x;
-  const double ry = world_pose.position.y;
-
-  // Check all points in the rectangular footprint
-  for (double back = 0.0; back <= ROBOT_LENGTH; back += GRID_STEP) {
-    for (double side = -ROBOT_WIDTH / 2.0; side <= ROBOT_WIDTH / 2.0; side += GRID_STEP) {
-      // Point in robot frame (front at 0,0). Negative x is behind the front
-      const double local_x = -back;
-      const double local_y = side;
-
-      // Transform to world frame
-      const double cos_yaw = std::cos(yaw);
-      const double sin_yaw = std::sin(yaw);
-      const double wx = rx + cos_yaw * local_x - sin_yaw * local_y;
-      const double wy = ry + sin_yaw * local_x + cos_yaw * local_y;
-
-      // Convert to grid indices
-      const int map_x = static_cast<int>(wx / map_msg_.info.resolution + static_cast<int>(map_msg_.info.width) / 2);
-      const int map_y = static_cast<int>(wy / map_msg_.info.resolution + static_cast<int>(map_msg_.info.height) / 2);
-
-      // Bounds check
-      if (map_x < 0 || map_x >= static_cast<int>(map_msg_.info.width) ||
-          map_y < 0 || map_y >= static_cast<int>(map_msg_.info.height)) {
-        return false; // out of map bounds treated as collision
-      }
-
-      const int map_idx = map_y * static_cast<int>(map_msg_.info.width) + map_x;
-      if (map_msg_.data[map_idx] >= OBSTACLE_THRESHOLD) {
-        return false; // collision detected
-      }
+      nav_msgs::msg::Path empty_path;
+      path_pub_->publish(empty_path);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Replanning due to timeout or progress...");
+      createPath();
     }
   }
+}
 
-  return true; // all footprint points are free
+bool PlannerNode::goalReached() {
+  double dx = goal_msg_.point.x - pose_msg_.position.x;
+  double dy = goal_msg_.point.y - pose_msg_.position.y;
+  return std::sqrt(dx * dx + dy * dy) < 0.5;
 }
 
 void PlannerNode::createPath() {
   if (!goal_flag_ || map_msg_.data.empty()) {
+    RCLCPP_WARN(this->get_logger(), "Cannot plan path: Missing map or goal!");
     return;
   }
 
+  // Convert robot and goal positions to grid indices
   CellIndex start = getCellIndex(pose_msg_);
   geometry_msgs::msg::Pose goal_pose;
   goal_pose.position.x = goal_msg_.point.x;
@@ -123,42 +73,74 @@ void PlannerNode::createPath() {
   goal_pose.orientation.w = 1.0;
   CellIndex goal = getCellIndex(goal_pose);
 
+  bool found = false;
+  int attempt = 0;
+  nav_msgs::msg::Path path;
+  obstacle_threshold_ = 80;
+  check_bound_ratio = 1.0;
+  // A* algorithm
   std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF> open_set;
   std::unordered_map<CellIndex, CellIndex, CellIndexHash> came_from;
   std::unordered_map<CellIndex, double, CellIndexHash> g_score;
 
+  open_set.emplace(start, 0.0);
   g_score[start] = 0.0;
-  open_set.emplace(start, heuristic(goal, start));
 
-  bool found = false;
-  while (!open_set.empty()) {
-    CellIndex current = open_set.top().index;
-    if (current == goal) {
-      found = true;
-      break;
+  while (!found && check_bound_ratio >= 0.2) {
+    if (obstacle_threshold_ > 80) {
+      check_bound_ratio -= 0.2;
     }
-    open_set.pop();
+    // reset for each attempt
+    came_from.clear();
+    g_score.clear();
+    g_score[start] = 0.0;
+    while (!open_set.empty()) {
+      open_set.pop(); // Clear the priority queue for the next attempt
+    }
+    RCLCPP_INFO(this->get_logger(), "Planning attempt %d with obstacle threshold %d", attempt + 1, obstacle_threshold_);
 
-    std::vector<CellIndex> neighbors = {
-      CellIndex(current.x + 1, current.y),
-      CellIndex(current.x - 1, current.y),
-      CellIndex(current.x, current.y + 1),
-      CellIndex(current.x, current.y - 1)
-    };
-
-    for (const auto &neighbor : neighbors) {
-      if (!checkValid(neighbor)) continue;
-      double tentative_g = g_score[current] + 1.0;
-      if (!g_score.count(neighbor) || tentative_g < g_score[neighbor]) {
-        came_from[neighbor] = current;
-        g_score[neighbor] = tentative_g;
-        double f = tentative_g + heuristic(goal, neighbor);
-        open_set.emplace(neighbor, f);
+    open_set.emplace(start, 0.0);
+    while (!open_set.empty()) {
+      CellIndex current = open_set.top().index;
+      if (current == goal) {
+        found = true;
+        break;
       }
+      open_set.pop();
+
+      // 4-connected neighbors
+      std::vector<CellIndex> neighbors = {
+        CellIndex(current.x + 1, current.y),
+        CellIndex(current.x - 1, current.y),
+        CellIndex(current.x, current.y + 1),
+        CellIndex(current.x, current.y - 1)
+      };
+
+      for (const auto& neighbor : neighbors) {
+        if (!checkValid(neighbor)) continue;
+        double tentative_g = g_score[current] + 1.0; // cost between cells
+
+        if (!g_score.count(neighbor) || tentative_g < g_score[neighbor]) {
+          came_from[neighbor] = current;
+          g_score[neighbor] = tentative_g;
+          double f = tentative_g + heuristic(goal, neighbor);
+          open_set.emplace(neighbor, f);
+        }
+      }
+    }
+
+    if (!found) {
+      obstacle_threshold_ += THRESHOLD_INCREMENT;
+      attempt++;
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Path planning attempt %d failed. Increasing threshold to %d",
+        attempt,
+        obstacle_threshold_
+      );
     }
   }
 
-  nav_msgs::msg::Path path;
   path.header.stamp = this->get_clock()->now();
   path.header.frame_id = "map";
   if (found) {
@@ -170,13 +152,120 @@ void PlannerNode::createPath() {
     }
     cells.push_back(start);
     std::reverse(cells.begin(), cells.end());
-    for (const auto &cell : cells) {
+
+    // Visualize the path on the map by marking path cells with -1
+    nav_msgs::msg::OccupancyGrid viz_map = map_msg_; // Copy the map
+    for (const auto& cell : cells) {
+      int idx = cell.y * viz_map.info.width + cell.x;
+      if (idx >= 0 && idx < static_cast<int>(viz_map.data.size())) {
+        viz_map.data[idx] = -1; // Mark path cell
+      }
+    }
+
+    // Optionally, print the map to the terminal for debugging
+    std::ostringstream map_oss;
+    for (unsigned int y = 0; y < viz_map.info.height; ++y) {
+      for (unsigned int x = 0; x < viz_map.info.width; ++x) {
+        int idx = y * viz_map.info.width + x;
+        map_oss << std::setw(4) << static_cast<int>(viz_map.data[idx]) << " ";
+      }
+      map_oss << "\n";
+    }
+    RCLCPP_INFO(this->get_logger(), "Map with path (path cells = -1):\n%s", map_oss.str().c_str());
+
+    for (const auto& cell : cells) {
       geometry_msgs::msg::PoseStamped pose;
+      pose.header = path.header;
       pose.pose = getPose(cell);
       path.poses.push_back(pose);
     }
+    RCLCPP_INFO(this->get_logger(), "Path planned with %zu waypoints.", path.poses.size());
+  } else {
+    RCLCPP_WARN(this->get_logger(), "No path found!");
+
+    path.header.stamp = this->get_clock()->now();
+    path.header.frame_id = "recovery";
+
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header = path.header;
+    pose.pose = pose_msg_;
+    path.poses.push_back(pose);
   }
   path_pub_->publish(path);
+}
+
+bool PlannerNode::checkValid(const CellIndex& index) {
+  RCLCPP_DEBUG(this->get_logger(), "checkValid (%d,%d)", index.x, index.y);
+  // Bounds check for the cell itself
+  if (index.x < 0 || index.x >= static_cast<int>(map_msg_.info.width) ||
+      index.y < 0 || index.y >= static_cast<int>(map_msg_.info.height)) {
+    return false;
+  }
+
+  // Robot footprint parameters (adaptive sizing)
+  double ROBOT_LENGTH = 1.5 * check_bound_ratio;   // meters (behind the robot)
+  double ROBOT_WIDTH  = 1.0 * check_bound_ratio;   // meters (centered on robot)
+  constexpr double GRID_STEP    = 0.5;   // meters (resolution for checking)
+
+  // Robot orientation (yaw)
+  auto& q = pose_msg_.orientation;
+  double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+
+  // World coordinates of the given cell (treated as robot front)
+  geometry_msgs::msg::Pose world_pose = getPose(index);
+  double rx = world_pose.position.x;
+  double ry = world_pose.position.y;
+
+  // Check all points in the rectangle footprint
+  for (double back = 0.0; back <= ROBOT_LENGTH; back += GRID_STEP) {
+    for (double side = -ROBOT_WIDTH/2.0; side <= ROBOT_WIDTH/2.0; side += GRID_STEP) {
+      // Compute the point in the robot frame (front is at 0,0)
+      double local_x = -back;      // negative: behind the robot
+      double local_y = side;
+
+      // Transform to world frame
+      double wx = rx + std::cos(yaw) * local_x - std::sin(yaw) * local_y;
+      double wy = ry + std::sin(yaw) * local_x + std::cos(yaw) * local_y;
+
+      // Convert to grid index
+      int map_x = static_cast<int>(wx / map_msg_.info.resolution + static_cast<int>(map_msg_.info.width) / 2);
+      int map_y = static_cast<int>(wy / map_msg_.info.resolution + static_cast<int>(map_msg_.info.height) / 2);
+
+      // Check bounds
+      if (map_x < 0 || map_x >= static_cast<int>(map_msg_.info.width) ||
+          map_y < 0 || map_y >= static_cast<int>(map_msg_.info.height)) {
+        return false; // Out of map bounds, treat as collision
+      }
+
+      int map_idx = map_y * map_msg_.info.width + map_x;
+      if (map_msg_.data[map_idx] >= obstacle_threshold_) {
+        return false; // Collision detected
+      }
+    }
+  }
+  return true; // All footprint cells are free
+}
+
+CellIndex PlannerNode::getCellIndex(const geometry_msgs::msg::Pose& pose) {
+  RCLCPP_DEBUG(this->get_logger(), "getCellIndex");
+  int x = static_cast<int>(pose.position.x/map_msg_.info.resolution + static_cast<int>(map_msg_.info.width/2));
+  int y = static_cast<int>(pose.position.y/map_msg_.info.resolution + static_cast<int>(map_msg_.info.height/2));
+  return CellIndex(x, y);
+}
+
+geometry_msgs::msg::Pose PlannerNode::getPose(const CellIndex& index) {
+  RCLCPP_DEBUG(this->get_logger(), "getPose");
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = (index.x - static_cast<int>(map_msg_.info.width/2)) * map_msg_.info.resolution;
+  pose.position.y = (index.y - static_cast<int>(map_msg_.info.height/2)) * map_msg_.info.resolution;
+  pose.orientation.w = 1.0;
+  pose.orientation.z = 0.0;
+  return pose;
+}
+
+double PlannerNode::heuristic(const CellIndex& goal, const CellIndex& current) {
+  RCLCPP_DEBUG(this->get_logger(), "heuristic");
+  return std::sqrt(std::pow(goal.x - current.x, 2) + std::pow(goal.y - current.y, 2));
 }
 
 int main(int argc, char ** argv)
