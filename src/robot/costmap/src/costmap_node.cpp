@@ -58,7 +58,6 @@ void CostmapNode::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr
   
   // Create and publish the occupancy grid message
   nav_msgs::msg::OccupancyGrid costmap_msg;
-  costmap_msg.header.frame_id = "robot/chassis";  // Set the frame_id for proper visualization
   costmap_msg.info.resolution = resolution;
   costmap_msg.info.width = width;
   costmap_msg.info.height = height;
