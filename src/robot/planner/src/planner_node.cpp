@@ -142,7 +142,7 @@ void PlannerNode::createPath() {
   }
 
   path.header.stamp = this->get_clock()->now();
-  path.header.frame_id = "map";
+  path.header.frame_id = "sim_world";
   if (found) {
     std::vector<CellIndex> cells;
     CellIndex current = goal;

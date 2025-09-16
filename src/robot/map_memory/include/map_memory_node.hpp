@@ -26,14 +26,20 @@ class MapMemoryNode : public rclcpp::Node {
     rclcpp::TimerBase::SharedPtr timer_;
     std::vector<int8_t> map_;
     nav_msgs::msg::OccupancyGrid map_msg_;
-    bool update_ = false;
+    bool update_ = false, costmap_update_ = false;
     double x_ = 0.0;
     double y_ = 0.0;
     double dis_ = 0.0;
     double new_x_ = 0.0;
     double new_y_ = 0.0;
     geometry_msgs::msg::Quaternion heading_;
-
+    double robot_x_ = 0.0;
+    double robot_y_ = 0.0;
+    double robot_yaw_ = 0.0;
+    nav_msgs::msg::OccupancyGrid global_map_msg_;
+    static constexpr int width_ = 300;
+    static constexpr int height_ = 300;
+    static constexpr double resolution_ = 0.1;
 };
 
 #endif 
