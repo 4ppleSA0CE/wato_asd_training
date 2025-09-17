@@ -17,7 +17,6 @@ MapMemoryNode::MapMemoryNode() : Node("map_memory"), map_memory_(robot::MapMemor
   global_map_msg_.info.height = height_;
   global_map_msg_.info.origin.position.x = -width_ * resolution_ / 2.0;
   global_map_msg_.info.origin.position.y = -height_ * resolution_ / 2.0;
-  // global_map_msg_.data = map_;
   updateMap();
   map_pub_->publish(global_map_msg_);
 }
@@ -25,8 +24,6 @@ MapMemoryNode::MapMemoryNode() : Node("map_memory"), map_memory_(robot::MapMemor
 void MapMemoryNode::costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
   map_msg_ = *msg;
   costmap_update_ = true;
-  // map_msg_.info.origin.position.x = x_;
-  // map_msg_.info.origin.position.y = y_;
 }
 
 void MapMemoryNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -73,7 +70,6 @@ void MapMemoryNode::updateMap() {
       }
     }
   }
-  // publish the global map message
   global_map_msg_.header.stamp = this->now();
   global_map_msg_.data = map_;
   map_pub_->publish(global_map_msg_);
