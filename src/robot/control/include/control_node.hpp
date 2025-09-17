@@ -37,7 +37,7 @@ class ControlNode : public rclcpp::Node {
     bool isNearObstacle(double x, double y, double threshold = 0.5);
 
     static constexpr double lookahead_distance_ = 1.0;
-    static constexpr double lin_kp_ = 0.85;
+    static constexpr double lin_kp_ = 0.8;
     static constexpr double ang_kp_ = 0.8;
     static constexpr double max_lin_vel_ = 1;
     static constexpr int dt_ = 100;
