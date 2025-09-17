@@ -74,7 +74,7 @@ void PlannerNode::createPath() {
   bool found = false;
   int attempt = 0;
   nav_msgs::msg::Path path;
-  obstacle_threshold_ = 80;
+  obstacle_threshold_ = 50; 
   check_bound_ratio = 1.0;
   // A* algorithm
   std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF> open_set;
@@ -85,7 +85,7 @@ void PlannerNode::createPath() {
   g_score[start] = 0.0;
 
   while (!found && check_bound_ratio >= 0.2) {
-    if (obstacle_threshold_ > 80) {
+    if (obstacle_threshold_ > 50) { 
       check_bound_ratio -= 0.2;
     }
     // reset for each attempt
@@ -93,7 +93,7 @@ void PlannerNode::createPath() {
     g_score.clear();
     g_score[start] = 0.0;
     open_set = std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF>();
-    RCLCPP_INFO(this->get_logger(), "attempt %d with obstacle threshold %d", attempt + 1, obstacle_threshold_);
+    // RCLCPP_INFO(this->get_logger(), "attempt %d with obstacle threshold %d", attempt + 1, obstacle_threshold_);
 
     open_set.emplace(start, 0.0);
     while (!open_set.empty()) {
@@ -219,7 +219,9 @@ bool PlannerNode::checkValid(const CellIndex& index) {
       }
 
       int map_idx = map_y * map_msg_.info.width + map_x;
-      if (map_msg_.data[map_idx] >= obstacle_threshold_) {
+      int8_t cost = map_msg_.data[map_idx];
+      // Treat high-cost cells as obstacles
+      if (cost >= obstacle_threshold_) {
         return false; // Collision detected
       }
     }

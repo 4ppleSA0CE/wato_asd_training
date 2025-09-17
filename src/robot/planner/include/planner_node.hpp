@@ -91,7 +91,7 @@ class PlannerNode : public rclcpp::Node {
     bool goal_flag_ = false;
     int obstacle_threshold_ = 80;
     double check_bound_ratio = 1.0;
-    static constexpr int THRESHOLD_INCREMENT = 10;
+    static constexpr int THRESHOLD_INCREMENT = 5;  // Smaller increment for more conservative planning
 
     void createPath();
     CellIndex getCellIndex(const geometry_msgs::msg::Pose& pose);
