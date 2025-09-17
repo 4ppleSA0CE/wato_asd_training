@@ -35,17 +35,18 @@ void MapMemoryNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
   robot_x_ = new_x_;
   robot_y_ = new_y_;
   dis_ += std::sqrt((new_x_ - x_) * (new_x_ - x_) + (new_y_ - y_) * (new_y_ - y_));
+  
   heading_ = msg->pose.pose.orientation;
   double roll, pitch, yaw;
   tf2::Quaternion q(heading_.x, heading_.y, heading_.z, heading_.w);
   tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-  double delta_yaw = std::remainder(yaw - robot_yaw_, 2 * M_PI);
   robot_yaw_ = yaw;
-  if (dis_ > 1.5 || std::fabs(delta_yaw) > 0.05) {
+  
+  if (dis_ > 1.5) {
     update_ = true;
     x_ = new_x_;
     y_ = new_y_;
-    dis_ = 0.0; // Reset distance counter
+    dis_ = 0.0;
   }
 }
 

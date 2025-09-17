@@ -47,7 +47,6 @@ void PlannerNode::timerCallback() {
       nav_msgs::msg::Path empty_path;
       path_pub_->publish(empty_path);
     } else {
-      RCLCPP_INFO(this->get_logger(), "Replanning due to timeout or progress...");
       createPath();
     }
   }
@@ -61,7 +60,6 @@ bool PlannerNode::goalReached() {
 
 void PlannerNode::createPath() {
   if (!goal_flag_ || map_msg_.data.empty()) {
-    RCLCPP_WARN(this->get_logger(), "Cannot plan path: Missing map or goal!");
     return;
   }
 
@@ -94,10 +92,8 @@ void PlannerNode::createPath() {
     came_from.clear();
     g_score.clear();
     g_score[start] = 0.0;
-    while (!open_set.empty()) {
-      open_set.pop(); // Clear the priority queue for the next attempt
-    }
-    RCLCPP_INFO(this->get_logger(), "Planning attempt %d with obstacle threshold %d", attempt + 1, obstacle_threshold_);
+    open_set = std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF>();
+    RCLCPP_INFO(this->get_logger(), "attempt %d with obstacle threshold %d", attempt + 1, obstacle_threshold_);
 
     open_set.emplace(start, 0.0);
     while (!open_set.empty()) {
@@ -108,12 +104,16 @@ void PlannerNode::createPath() {
       }
       open_set.pop();
 
-      // 4-connected neighbors
+      // 8-connected neighbors
       std::vector<CellIndex> neighbors = {
         CellIndex(current.x + 1, current.y),
         CellIndex(current.x - 1, current.y),
         CellIndex(current.x, current.y + 1),
-        CellIndex(current.x, current.y - 1)
+        CellIndex(current.x, current.y - 1),
+        CellIndex(current.x + 1, current.y + 1),
+        CellIndex(current.x - 1, current.y + 1),
+        CellIndex(current.x + 1, current.y - 1),
+        CellIndex(current.x - 1, current.y - 1),
       };
 
       for (const auto& neighbor : neighbors) {
@@ -132,12 +132,6 @@ void PlannerNode::createPath() {
     if (!found) {
       obstacle_threshold_ += THRESHOLD_INCREMENT;
       attempt++;
-      RCLCPP_INFO(
-        this->get_logger(),
-        "Path planning attempt %d failed. Increasing threshold to %d",
-        attempt,
-        obstacle_threshold_
-      );
     }
   }
 
@@ -162,26 +156,13 @@ void PlannerNode::createPath() {
       }
     }
 
-    // Optionally, print the map to the terminal for debugging
-    std::ostringstream map_oss;
-    for (unsigned int y = 0; y < viz_map.info.height; ++y) {
-      for (unsigned int x = 0; x < viz_map.info.width; ++x) {
-        int idx = y * viz_map.info.width + x;
-        map_oss << std::setw(4) << static_cast<int>(viz_map.data[idx]) << " ";
-      }
-      map_oss << "\n";
-    }
-    RCLCPP_INFO(this->get_logger(), "Map with path (path cells = -1):\n%s", map_oss.str().c_str());
-
     for (const auto& cell : cells) {
       geometry_msgs::msg::PoseStamped pose;
       pose.header = path.header;
       pose.pose = getPose(cell);
       path.poses.push_back(pose);
     }
-    RCLCPP_INFO(this->get_logger(), "Path planned with %zu waypoints.", path.poses.size());
   } else {
-    RCLCPP_WARN(this->get_logger(), "No path found!");
 
     path.header.stamp = this->get_clock()->now();
     path.header.frame_id = "recovery";
@@ -205,7 +186,7 @@ bool PlannerNode::checkValid(const CellIndex& index) {
   // Robot footprint parameters (adaptive sizing)
   double ROBOT_LENGTH = 1.5 * check_bound_ratio;   // meters (behind the robot)
   double ROBOT_WIDTH  = 1.0 * check_bound_ratio;   // meters (centered on robot)
-  constexpr double GRID_STEP    = 0.5;   // meters (resolution for checking)
+  constexpr double GRID_STEP    = 0.1;   // meters (resolution for checking)
 
   // Robot orientation (yaw)
   auto& q = pose_msg_.orientation;
