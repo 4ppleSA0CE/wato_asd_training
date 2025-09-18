@@ -163,14 +163,8 @@ void PlannerNode::createPath() {
       path.poses.push_back(pose);
     }
   } else {
-
-    path.header.stamp = this->get_clock()->now();
-    path.header.frame_id = "recovery";
-
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header = path.header;
-    pose.pose = pose_msg_;
-    path.poses.push_back(pose);
+    RCLCPP_WARN(this->get_logger(), "No valid path found to goal");
+    // No recovery path - publish empty path
   }
   path_pub_->publish(path);
 }
